@@ -38,11 +38,11 @@ def execution_stage(context: LaunchContext,
     if (robot_namespace.perform(context) != "/"):
         rp_ns = robot_namespace.perform(context) + "/"
 
-    launches = []
+    launch_actions = []
 
     # Setting up the URDF
     urdf = os.path.join(neo_mp_400,
-        'robot_model/mp_400',
+        'robot_model',
         'mp_400.urdf.xacro')
 
     # Start robot state publisher
@@ -62,10 +62,51 @@ def execution_stage(context: LaunchContext,
             ]),
             'frame_prefix': rp_ns
         }],
+        remappings=[
+            ('/tf', 'tf'),
+            ('/tf_static', 'tf_static'),
+            ],
         arguments=[urdf]
         )
 
-    launches.append(start_robot_state_publisher_cmd)
+    launch_actions.append(start_robot_state_publisher_cmd)
+
+    #  Launch hardware nodes
+    # 1. Relayboard
+    relayboard = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(neo_mp_400, 'configs/relayboard_v2', 'relayboard_v2.launch.py')
+            ),
+            launch_arguments={
+                'namespace': robot_namespace
+            }.items()
+        )
+
+    launch_actions.append(relayboard)
+
+    # 2. Kinematics
+    kinematics = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(neo_mp_400, 'configs/kinematics', 'kinematics.launch.py')
+            ),
+            launch_arguments={
+                'namespace': robot_namespace
+            }.items()
+        )
+
+    launch_actions.append(kinematics)
+
+    # 3. Teleop
+    teleop = IncludeLaunchDescription(
+             PythonLaunchDescriptionSource(
+                 os.path.join(neo_mp_400, 'configs/teleop', 'teleop.launch.py')
+            ),
+            launch_arguments={
+                'namespace': robot_namespace
+            }.items()
+        )
+
+    launch_actions.append(teleop)
 
     # 4. Laser
     laser = IncludeLaunchDescription(
@@ -76,7 +117,7 @@ def execution_stage(context: LaunchContext,
                 'namespace': robot_namespace
             }.items()
         )
-    launches.append(laser)
+    launch_actions.append(laser)
 
     # 5. IMU
     imu = IncludeLaunchDescription(
@@ -91,7 +132,7 @@ def execution_stage(context: LaunchContext,
             condition=IfCondition(imu_enable)
         )
 
-    launches.append(imu)
+    launch_actions.append(imu)
 
     # 6. D435
     # TODO: Add support for namespacing
@@ -104,21 +145,11 @@ def execution_stage(context: LaunchContext,
             condition=IfCondition(d435_enable)
         )
 
-    launches.append(d435)
+    launch_actions.append(d435)
 
-    return launches
+    return launch_actions
 
 def generate_launch_description():
-    neo_mp_400 = get_package_share_directory('neo_mp_400-2')
-
-    # Launch configurations
-    robot_namespace = LaunchConfiguration('robot_namespace')
-    imu_enable = LaunchConfiguration('imu_enable')
-    realsense_enable = LaunchConfiguration('d435_enable')
-    uss_enable = LaunchConfiguration('uss_enable')
-    scanner_type = LaunchConfiguration('scanner_type')
-
-    context_arguments = [robot_namespace, imu_enable, realsense_enable, uss_enable, scanner_type]
 
     # Declare the launch arguments
     declare_namespace_cmd = DeclareLaunchArgument(
@@ -147,49 +178,24 @@ def generate_launch_description():
             description='Type of laser scanner to use'
         )
 
-    #  Launch hardware nodes
-    # 1. Relayboard
-    relayboard = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(neo_mp_400, 'configs/relayboard_v2', 'relayboard_v2.launch.py')
-            ),
-            launch_arguments={
-                'namespace': robot_namespace
-            }.items()
-        )
-
-    # 2. Kinematics
-    kinematics = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(neo_mp_400, 'configs/kinematics', 'kinematics.launch.py')
-            ),
-            launch_arguments={
-                'namespace': robot_namespace
-            }.items()
-        )
-
-    # 3. Teleop
-    teleop = IncludeLaunchDescription(
-             PythonLaunchDescriptionSource(
-                 os.path.join(neo_mp_400, 'configs/teleop', 'teleop.launch.py')
-            ),
-            launch_arguments={
-                'namespace': robot_namespace
-            }.items()
-        )
 
     # Opaque function for configuring URDF, IMU, Realsense and the USBoard
-    opq_function = OpaqueFunction(function=execution_stage, args=context_arguments)
+    opq_function = OpaqueFunction(
+    function=execution_stage, 
+    args=[
+        LaunchConfiguration('robot_namespace'),
+        LaunchConfiguration('imu_enable'),
+        LaunchConfiguration('d435_enable'),
+        LaunchConfiguration('uss_enable'),
+        LaunchConfiguration('scanner_type'),
+        ])
 
-    ld = LaunchDescription()
-    ld.add_action(declare_namespace_cmd)
-    ld.add_action(declare_imu_cmd)
-    ld.add_action(declare_realsense_cmd)
-    ld.add_action(declare_uss_cmd)
-    ld.add_action(declare_scanner_type_cmd)
-    ld.add_action(relayboard)
-    ld.add_action(kinematics)
-    ld.add_action(teleop)
-    ld.add_action(opq_function)
-
+    ld = LaunchDescription([
+        declare_namespace_cmd,
+        declare_imu_cmd,
+        declare_realsense_cmd,
+        declare_uss_cmd,
+        declare_scanner_type_cmd,
+        opq_function
+    ])
     return ld
